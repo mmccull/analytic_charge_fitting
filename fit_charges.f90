@@ -325,8 +325,8 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B)
         Aavg=0
 
         !Compute the distance between the CG sites
-        !$omp parallel private(cgSite1,cgSite2,j,dist) SHARED(cgPos,A,AcolAvg,ArowAvg,Aavg) num_threads(np)
-        !$omp do
+!        !$omp parallel private(cgSite1,cgSite2,j,dist) SHARED(cgPos,A,AcolAvg,ArowAvg,Aavg) num_threads(np)
+!        !$omp do
         do cgSite1 = 1, nCg-1
                 do cgSite2 = cgSite1+1,nCg
                         dist = 0
@@ -344,8 +344,8 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B)
                         !$omp end critical
                 enddo
         enddo
-        !$omp end do nowait
-        !$omp end parallel
+!        !$omp end do nowait
+!        !$omp end parallel
         !finish averages
         Aavg = Aavg/dble(nCg**2)
         AcolAvg = AcolAvg/dble(nCg)
@@ -357,19 +357,23 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B)
 
 
        !Subtract means and such 
+        !$omp parallel private(cgSite1,cgSite2) SHARED(A,AcolAvg,ArowAvg,Aavg) num_threads(np)
+        !$omp do
         do cgSite1 = 1, nCg
                 do cgSite2 = 1,nCg
                        A(cgSite1,cgSite2) = A(cgSite1,cgSite2) - (AcolAvg(cgSite2)+ArowAvg(cgSite1)) + Aavg + 1 
                 enddo
         enddo
+        !$omp end do nowait
+        !$omp end parallel
 
 
         BcolAvg=0
         BrowAvg=0
         Bavg=0
         !Compute the distance between cg sites and atoms
-        !$omp parallel private(cgSite1,atom1,j,dist) SHARED(cgPos,atomPos,B,BcolAvg,BrowAvg,Bavg) num_threads(np)
-        !$omp do
+!        !$omp parallel private(cgSite1,atom1,j,dist) SHARED(cgPos,atomPos,B,BcolAvg,BrowAvg,Bavg) num_threads(np)
+!        !$omp do
         do cgSite1 = 1, nCg
                 do atom1 = 1,nAtoms
                         dist = 0
@@ -379,24 +383,28 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B)
                         B(cgSite1,atom1) = -sqrt(dist)
                         BcolAvg(atom1) = BcolAvg(atom1) + B(cgSite1,atom1)
                         BrowAvg(cgSite1) = BrowAvg(cgSite1) + B(cgSite1,atom1)
-                        !$omp critical
+!                        !$omp critical
                         Bavg = Bavg + B(cgSite1,atom1)
-                        !$omp end critical
+!                        !$omp end critical
                 enddo
         enddo
-        !$omp end do nowait
-        !$omp end parallel 
+!        !$omp end do nowait
+!        !$omp end parallel 
         !finish averages
         Bavg = Bavg/dble(nAtoms*nCg)
         BcolAvg = BcolAvg/dble(nCg)
         BrowAvg = BrowAvg/dble(nAtoms)
 
+        !$omp parallel private(cgSite1,atom1) SHARED(B,BcolAvg,BrowAvg,Bavg) num_threads(np)
+        !$omp do
         !Subtract means and such 
         do cgSite1 = 1, nCg
                 do atom1 = 1,nAtoms
                        B(cgSite1,atom1) = B(cgSite1,atom1) - (BcolAvg(atom1)+BrowAvg(cgSite1)) + Bavg + 1 
                 enddo
         enddo
+        !$omp end do nowait
+        !$omp end parallel 
 
 
 endsubroutine compute_A_B_matrices
