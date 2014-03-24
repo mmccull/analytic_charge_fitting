@@ -106,7 +106,7 @@ subroutine read_trajectories(AtA,AtB)
         allocate(atomPos(nAtoms,3),cgPos(nCg,3))
 
         do step=1,nSteps
-                if (mod(step,deltaStep)==1) then
+                if (mod(step,deltaStep)==0) then
                         write(*,'("Reading step ",i10," of ",i10)') step, nSteps
                         call read_dcd_step(atomPos,nAtoms,20)
                         call read_dcd_step(cgPos,nCg,30)
@@ -339,9 +339,9 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B)
                         AcolAvg(cgSite2) = AcolAvg(cgSite2) + A(cgSite1,cgSite2)
                         ArowAvg(cgSite1) = ArowAvg(cgSite1) + A(cgSite1,cgSite2)
                         ArowAvg(cgSite2) = ArowAvg(cgSite2) + A(cgSite2,cgSite1)
-                        !$omp critical
+!                        !$omp critical
                         Aavg = Aavg + 2*A(cgSite1,cgSite2)
-                        !$omp end critical
+!                        !$omp end critical
                 enddo
         enddo
 !        !$omp end do nowait
