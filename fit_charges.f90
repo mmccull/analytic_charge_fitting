@@ -37,6 +37,12 @@ module cgData
 
 endmodule cgData
 
+module output
+
+        character*80 outputFile
+
+endmodule output
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!  Main Program !!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -44,12 +50,13 @@ endmodule cgData
 program cg_charge_fit
         use atomData
         use cgData
+        use output
         implicit none
         real (kind=8), allocatable :: AtA(:,:)
         real (kind=8), allocatable :: AtB(:,:)
         
 
-        call parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,nCg)
+        call parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,outputFile,nCg)
 
         call read_psf_file
 
@@ -58,7 +65,7 @@ program cg_charge_fit
         call read_trajectories(AtA,AtB)
 
         print*, "fitting charges"
-        call fit_charges(AtA, AtB, atomCharges, cgCharges, nAtoms, nCg)
+        call fit_charges(AtA, AtB, atomCharges, cgCharges, nAtoms, nCg,outputFile)
 
 
 endprogram cg_charge_fit
@@ -106,11 +113,11 @@ subroutine read_trajectories(AtA,AtB)
         allocate(atomPos(nAtoms,3),cgPos(nCg,3))
 
         do step=1,nSteps
-                if (mod(step,deltaStep)==0) then
-                        write(*,'("Reading step ",i10," of ",i10)') step, nSteps
-                        call read_dcd_step(atomPos,nAtoms,20)
-                        call read_dcd_step(cgPos,nCg,30)
+                call read_dcd_step(atomPos,nAtoms,20)
+                call read_dcd_step(cgPos,nCg,30)
 
+                if (mod(step,deltaStep)==0) then
+                        write(*,'("Working on step ",i10," of ",i10)') step, nSteps
                         !compute A and B for this step (distances)
                         call compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B)
 
@@ -152,7 +159,7 @@ subroutine read_trajectories(AtA,AtB)
 endsubroutine read_trajectories
 
 !read command line information
-subroutine parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,nCg)
+subroutine parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,outputFile,nCg)
         use inputData
         use openmp
         implicit none
@@ -161,12 +168,14 @@ subroutine parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,nCg)
         character*80 atomPsfFile
         character*80 atomDcdFile
         character*80 cgDcdFile
+        character*80 outputFile
         logical deltaStepFlag
         logical atomPsfFlag
         logical atomDcdFlag
         logical cgDcdFlag
         logical nCgFlag
         logical npFlag
+        logical outputFlag
         integer nCg
 
         atomPsfFlag = .false.
@@ -175,6 +184,7 @@ subroutine parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,nCg)
         nCgFlag = .false.
         npFlag = .false.
         deltaStepFlag = .false.
+        outputFlag=.false.
         i=1
         do 
    
@@ -196,6 +206,10 @@ subroutine parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,nCg)
                         i = i+1
                         call get_command_argument(i,atomPsfFile)
                         atomPsfFlag=.true.
+                case ('-o')
+                        i = i+1
+                        call get_command_argument(i,outputFile)
+                        outputFlag=.true.
                 case ('-adcd')
                         i = i+1
                         call get_command_argument(i,atomDcdFile)
@@ -211,7 +225,7 @@ subroutine parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,nCg)
                         deltaStepFlag = .true.
                 case default 
                         print '(a,a,/)', 'Unrecognized command-line option: ', arg 
-                        print*, 'Usage: fit_charges.x -ncg [# cg sites] -psf [atom psf file] -adcd [atom dcd file] -cgdcd [cg dcd file] -step [delta step size]'
+                        print*, 'Usage: fit_charges.x -ncg [# cg sites] -psf [atom psf file] -adcd [atom dcd file] -cgdcd [cg dcd file] -step [delta step size] -o [outputfile name] -np [# of threads]'
                         stop 
                 end select 
                 i = i+1
@@ -232,6 +246,10 @@ subroutine parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,nCg)
         endif
         if (cgDcdFlag.eqv..false.) then
                 write(*,'("Must provide a CG dcd file using command line argument -cgdcd [CG dcd file name]")')
+                stop
+        endif
+        if (outputFlag.eqv..false.) then
+                write(*,'("No output file name provided.  Please provide an output file name with the following command line argument: -o [output file name]")')
                 stop
         endif
         if (deltaStepFlag.eqv..false.) then
@@ -411,7 +429,7 @@ endsubroutine compute_A_B_matrices
 
 
 
-subroutine fit_charges(AtA, AtB, atomCharges, cgCharges, nAtoms, nCg)
+subroutine fit_charges(AtA, AtB, atomCharges, cgCharges, nAtoms, nCg, outputFile)
         implicit none
         integer nAtoms
         integer nCg
@@ -424,6 +442,7 @@ subroutine fit_charges(AtA, AtB, atomCharges, cgCharges, nAtoms, nCg)
         !lapack routine variables
         real (kind=8) workQuery(1)
         real (kind=8), allocatable :: work(:)
+        character*80 outputFile
         integer info
         integer lwork
         integer j
@@ -440,11 +459,13 @@ subroutine fit_charges(AtA, AtB, atomCharges, cgCharges, nAtoms, nCg)
         
         cgCharges = newB
 
+        open(50,file=outputFile)
         do j=1,nCg
 
-                write(*,'(f8.3)') cgCharges(j)
+                write(50,'(f8.3)') cgCharges(j)
 
         enddo
+        close(50)
 
         write(*,'(a17,f8.3)') "Total CG Charge:",sum(cgCharges)
 
