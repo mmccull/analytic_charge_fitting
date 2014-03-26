@@ -1,5 +1,5 @@
-GFORTRAN module version '6' created from dcd.f90 on Mon Mar 24 17:57:31 2014
-MD5:53829d67dd7ee846c2a5fb569eefc0d8 -- If you edit this, you'll get what you deserve.
+GFORTRAN module version '9' created from dcd.f90
+MD5:3f75716c0d2248dffa5d30e3f9e19378 -- If you edit this, you'll get what you deserve.
 
 (() () () () () () () () () () () () () () () () () () () () () () () ()
 () () ())
@@ -14,12 +14,12 @@ MD5:53829d67dd7ee846c2a5fb569eefc0d8 -- If you edit this, you'll get what you de
 
 ()
 
-(2 'endianess' 'endianess' 'endianess' 1 ((MODULE UNKNOWN-INTENT
-UNKNOWN-PROC UNKNOWN UNKNOWN 0 0) (UNKNOWN 0 0 0 UNKNOWN ()) 0 0 () () 0
-() () () 0 0)
-3 'nativeendianess' 'endianess' 'nativeendianess' 1 ((VARIABLE
-UNKNOWN-INTENT UNKNOWN-PROC UNKNOWN UNKNOWN 0 0) (LOGICAL 4 0 0 LOGICAL
-()) 0 0 () () 0 () () () 0 0)
+(2 'endianess' 'endianess' '' 1 ((MODULE UNKNOWN-INTENT UNKNOWN-PROC
+UNKNOWN UNKNOWN 0 0) (UNKNOWN 0 0 0 0 UNKNOWN ()) 0 0 () () 0 () () () 0
+0)
+3 'nativeendianess' 'endianess' '' 1 ((VARIABLE UNKNOWN-INTENT
+UNKNOWN-PROC UNKNOWN UNKNOWN 0 0) (LOGICAL 4 0 0 0 LOGICAL ()) 0 0 () ()
+0 () () () 0 0)
 )
 
 ('endianess' 0 2 'nativeendianess' 0 3)

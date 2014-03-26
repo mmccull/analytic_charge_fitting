@@ -43,6 +43,13 @@ module output
 
 endmodule output
 
+module timing
+
+        real (kind=8) ti,t1,t2
+        real (kind=8) readTime,computeTime,accumTime, fitTime
+
+endmodule timing
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!  Main Program !!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -51,10 +58,18 @@ program cg_charge_fit
         use atomData
         use cgData
         use output
+        use timing
+        use openmp
         implicit none
         real (kind=8), allocatable :: AtA(:,:)
         real (kind=8), allocatable :: AtB(:,:)
+        real (kind=8) omp_get_wtime
         
+        ti = omp_get_wtime()
+        readTime=0
+        computeTime=0
+        accumTime=0
+        fitTime=0
 
         call parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,outputFile,nCg)
 
@@ -65,8 +80,20 @@ program cg_charge_fit
         call read_trajectories(AtA,AtB)
 
         print*, "fitting charges"
+        t1 = omp_get_wtime()
         call fit_charges(AtA, AtB, atomCharges, cgCharges, nAtoms, nCg,outputFile)
+        t2 = omp_get_wtime()
+        fitTime = t2-t1
 
+        !Correct times for multiple cores
+!        accumTime = accumTime/real(np)
+!        computeTime = computeTime/real(np)
+
+        write(*,'("Total time elapsed:",f8.3,f8.3)') readTime+accumTime+computeTime+fitTime,t2-ti
+        write(*,'("Time to read dcd  :",f8.3)') readTime
+        write(*,'("Time to accumulate:",f8.3)') accumTime
+        write(*,'("Time to compute   :",f8.3)') computeTime
+        write(*,'("Time to fit       :",f8.3)') fitTime
 
 endprogram cg_charge_fit
 
@@ -81,12 +108,14 @@ subroutine read_trajectories(AtA,AtB)
         use cgData
         use atomData
         use openmp
+        use timing
         implicit none
         integer atom1, cg1, cg2
         integer k
         integer nSteps
         integer step
         integer omp_get_thread_num, omp_get_num_procs, omp_get_num_threads, omp_get_max_threads
+        real (kind=8) omp_get_wtime
         integer nProcs, nThreads, threadID
         real (kind=8) temp
         real (kind=8) A(nCg,nCg)
@@ -113,23 +142,24 @@ subroutine read_trajectories(AtA,AtB)
         allocate(atomPos(nAtoms,3),cgPos(nCg,3))
 
         do step=1,nSteps
+                t1 = omp_get_wtime()
                 call read_dcd_step(atomPos,nAtoms,20)
                 call read_dcd_step(cgPos,nCg,30)
+                t2 = omp_get_wtime()
+                readTime = readTime+(t2-t1)
 
                 if (mod(step,deltaStep)==0) then
                         write(*,'("Working on step ",i10," of ",i10)') step, nSteps
                         !compute A and B for this step (distances)
+                        t1 = omp_get_wtime()
                         call compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B)
+                        t2 = omp_get_wtime()
+                        computeTime = computeTime + (t2-t1)
 
                         call omp_set_num_threads(np)
+                        t1 = omp_get_wtime()
                         !$OMP  PARALLEL SHARED(AtA,AtB,A,B,nCg,nAtoms) PRIVATE(cg1,cg2,k,atom1)
                         threadID = omp_get_thread_num()
-!                        print*, "Thread ID:", threadID
-!                        if (threadID==0) then
-!                                nProcs = omp_get_num_procs()
-!                                nThreads = omp_get_max_threads()
-!                                print*, "Number of procs:",nProcs,"Max number of threads:",nThreads
-!                        endif
                         !accumulate AtA and AtB
                         !$OMP DO
                         do cg1=1,nCg
@@ -149,6 +179,8 @@ subroutine read_trajectories(AtA,AtB)
                         enddo
                         !$OMP END DO NOWAIT
                         !$OMP END PARALLEL
+                        t2 = omp_get_wtime()
+                        accumTime = accumTime + (t2-t1)
                 endif
         enddo
         !

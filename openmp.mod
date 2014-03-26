@@ -1,5 +1,5 @@
-GFORTRAN module version '6' created from fit_charges.f90 on Mon Mar 24 17:57:31 2014
-MD5:15d31b1e98ec5774b29a52ff73061f32 -- If you edit this, you'll get what you deserve.
+GFORTRAN module version '9' created from fit_charges.f90
+MD5:482159ad4ffe1d3c4d45d111c1c71b5b -- If you edit this, you'll get what you deserve.
 
 (() () () () () () () () () () () () () () () () () () () () () () () ()
 () () ())
@@ -14,10 +14,10 @@ MD5:15d31b1e98ec5774b29a52ff73061f32 -- If you edit this, you'll get what you de
 
 ()
 
-(2 'np' 'openmp' 'np' 1 ((VARIABLE UNKNOWN-INTENT UNKNOWN-PROC UNKNOWN
-UNKNOWN 0 0) (INTEGER 4 0 0 INTEGER ()) 0 0 () () 0 () () () 0 0)
-3 'openmp' 'openmp' 'openmp' 1 ((MODULE UNKNOWN-INTENT UNKNOWN-PROC
-UNKNOWN UNKNOWN 0 0) (UNKNOWN 0 0 0 UNKNOWN ()) 0 0 () () 0 () () () 0 0)
+(2 'np' 'openmp' '' 1 ((VARIABLE UNKNOWN-INTENT UNKNOWN-PROC UNKNOWN
+UNKNOWN 0 0) (INTEGER 4 0 0 0 INTEGER ()) 0 0 () () 0 () () () 0 0)
+3 'openmp' 'openmp' '' 1 ((MODULE UNKNOWN-INTENT UNKNOWN-PROC UNKNOWN
+UNKNOWN 0 0) (UNKNOWN 0 0 0 0 UNKNOWN ()) 0 0 () () 0 () () () 0 0)
 )
 
 ('np' 0 2 'openmp' 0 3)
