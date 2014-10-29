@@ -78,7 +78,7 @@ program cg_charge_fit
         real minChi2
         real chi2
         real (kind=8) omp_get_wtime
-        integer iter
+        integer iter, i
 !        integer, allocatable :: gen_rand_ordered_seq(:)
 
         ti = omp_get_wtime()
@@ -97,7 +97,7 @@ program cg_charge_fit
         do iter=1,maxIter
 
                 !generate boundary atoms
-                call gen_rand_ordered_seq(nCg-1,1,nRes,boundaryRes)
+                call gen_rand_ordered_seq(nCg-1,1,nRes-1,boundaryRes)
 
                 !make CG trajectory
                 call create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,nSteps,boundaryRes)
@@ -107,6 +107,12 @@ program cg_charge_fit
 
                 !Fit charges
                 call fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg,chi2)
+
+                do i=1,nCg
+                        print*, cgCharges(i)
+                enddo
+
+                write(*,'("Charge fitting residual sum of squares for iteration",i4,"is:",f40.10)') iter,chi2
 
         enddo
 
@@ -136,6 +142,7 @@ subroutine create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,
         integer cg, atom, step
         real temp(3)
         real mass
+        integer j
 
 
         do step=1,nSteps
@@ -145,19 +152,19 @@ subroutine create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,
                         temp=0
                         mass=0
                         if (cg<nCg) then
-                                stopAtom = resAtomStart(boundaryRes(cg))-1
+                                stopAtom = resAtomStart(boundaryRes(cg)+1)-1
                         else
                                 stopAtom = nAtoms
                         endif
+!                        print*, startAtom,stopAtom
                         do atom=startAtom,stopAtom
-                                temp = atomMasses(atom)*atomPos(atom,:,step)
-                                mass = mass+ atomMasses(atom)
+                                temp = temp + atomMasses(atom)*atomPos(atom,:,step)
+                                mass = mass + atomMasses(atom)
                         enddo
                         cgPos(cg,:,step) = temp/mass
-                        startAtom = resAtomStart(boundaryRes(cg))
+                        startAtom = resAtomStart(boundaryRes(cg)+1)
                 enddo
         enddo
-
 
 endsubroutine create_CG_traj
 
@@ -175,6 +182,7 @@ subroutine gen_rand_ordered_seq(numSeq,minSeq,maxSeq,seq)
 
         do i=1,numSeq
                 diff = .false.
+                ! genererate a random integer between minSeq and maxSeq and make sure we don't have it already
                 do while (diff.eqv..false.) 
                         call random_number(temp)
                         tempInt = int(temp*(maxSeq-minSeq))+minSeq
@@ -189,14 +197,13 @@ subroutine gen_rand_ordered_seq(numSeq,minSeq,maxSeq,seq)
                         endif
                 enddo
                 seq(i) = tempInt
+                ! if we have more than one element we need to sort them in ascending order
                 if (i.gt.1) then
                         do j=1,i-1
+                                !check to see if the current element is less than element j 
                                 if (seq(i)<seq(j)) then
-                                        tempInt=seq(i)
-                                        do k=i,j+1  !downwards
-                                                seq(k) = seq(k-1)
-                                        enddo
-                                        seq(j) = tempInt
+                                        !shift the entire array from element j to i circularly 1 to the right
+                                        seq(j:i)=cshift(seq(j:i),-1)
                                         exit
                                 endif
                         enddo
@@ -303,14 +310,10 @@ subroutine parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,outputFile,nCg)
                         i = i+1
                         call get_command_argument(i,outputFile)
                         outputFlag=.true.
-                case ('-adcd')
+                case ('-dcd')
                         i = i+1
                         call get_command_argument(i,atomDcdFile)
                         atomDcdFlag=.true.
-                case ('-cgdcd')
-                        i = i+1
-                        call get_command_argument(i,cgDcdFile)
-                        cgDcdFlag=.true.
                 case ('-step') 
                         i = i+1
                         call get_command_argument(i,arg)
@@ -335,10 +338,6 @@ subroutine parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,outputFile,nCg)
         endif
         if (atomDcdFlag.eqv..false.) then
                 write(*,'("Must provide a atom dcd file using command line argument -adcd [atom dcd file name]")')
-                stop
-        endif
-        if (cgDcdFlag.eqv..false.) then
-                write(*,'("Must provide a CG dcd file using command line argument -cgdcd [CG dcd file name]")')
                 stop
         endif
         if (outputFlag.eqv..false.) then
@@ -449,8 +448,8 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
         B=0
 
         !Compute the distance between the CG sites
-        !$omp parallel private(step,cgSite1,cgSite2,atom1,j,dist,temp) SHARED(cgPos,A,B,atomPos) num_threads(np)
-        !$omp do schedule(dynamic)
+!!        !$omp parallel private(step,cgSite1,cgSite2,atom1,j,dist,temp) SHARED(cgPos,A,B,atomPos) num_threads(np)
+!!        !$omp do schedule(dynamic)
         do step=1,nSteps
                 do cgSite1 = 1, nCg-1
                         do cgSite2 = cgSite1+1,nCg
@@ -460,11 +459,10 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
                                         dist = dist + temp*temp
                                 enddo
                                 dist = sqrt(dist)
-                                !$omp atomic
+!!                                !$omp atomic
                                 A(cgSite1,cgSite2) = A(cgSite1,cgSite2)-dist
-                                !$omp atomic
+!!                                !$omp atomic
                                 A(cgSite2,cgSite1) = A(cgSite2,cgSite1)-dist
-                             !   print*, "Distance between site", cgSite1, "and site", cgSite2,":",dist
                         enddo
                 enddo
 
@@ -476,13 +474,13 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
                                         temp = cgPos(cgSite1,j,step)-atomPos(atom1,j,step)
                                         dist = dist + temp*temp
                                 enddo
-                                !$omp atomic
+!!                                !$omp atomic
                                 B(cgSite1,atom1) = B(cgSite1,atom1)-sqrt(dist)
                         enddo
                 enddo
         enddo
-        !$omp end do 
-        !$omp end parallel 
+!!        !$omp end do 
+!!        !$omp end parallel 
 
 endsubroutine compute_A_B_matrices
 
@@ -504,8 +502,8 @@ subroutine fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg, rss)
         real temp(1,1)
         real rss
         !lapack routine variables
-        real (kind=8) workQuery(1)
-        real (kind=8), allocatable :: work(:)
+        real workQuery(1)
+        real, allocatable :: work(:)
         integer info
         integer lwork
         integer j, i, k
@@ -527,10 +525,11 @@ subroutine fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg, rss)
 
         !Now use lapack routine to solve least squares problem A*cgCharges=B*atomCharges
         newB = matmul(BTemp,atomCharges)
-        call dgels("N",nCg+1,nCg,1,ATemp,nCg+1,newB,nCg+1,workQuery,-1,info)
+        call sgels("N",nCg+1,nCg,1,ATemp,nCg+1,newB,nCg+1,workQuery,-1,info)
         lwork = int(workQuery(1))
+        print*, "optimal work array size:",lwork
         allocate(work(lwork))
-        call dgels("N",nCg+1,nCg,1,ATemp,nCg+1,newB,nCg+1,work,lwork,info)
+        call sgels("N",nCg+1,nCg,1,ATemp,nCg+1,newB,nCg+1,work,lwork,info)
         deallocate(work)
         
         cgCharges(:,1) = newB(1:nCg)
@@ -539,7 +538,7 @@ subroutine fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg, rss)
         temp = matmul(transpose(atomChargesM),matmul(C,atomChargesM))+matmul(transpose(cgCharges),matmul(A,cgCharges))-2*matmul(transpose(cgCharges),matmul(B,atomChargesM))
         rss = temp(1,1)
 
-!        write(*,'(a17,f8.3)') "Total CG Charge:",sum(cgCharges)
+        write(*,'(a17,f8.3)') "Total CG Charge:",sum(cgCharges)
 !        write(*,'("Residual Sum of Squares:",f8.3,f8.3)') newB(nCg+1), rss(1,1)
 
 
