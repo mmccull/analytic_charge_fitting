@@ -216,7 +216,7 @@ subroutine read_dcd_step(coord,nAtoms, filePointer)
    use endianess
    implicit none
    integer nAtoms
-   real (kind=8) coord(nAtoms,3)
+   real coord(nAtoms,3)
    integer filePointer
    integer i, j
    real tempPos
@@ -243,7 +243,7 @@ subroutine read_dcd_step(coord,nAtoms, filePointer)
            read(filePointer) junk
            do i=1, nAtoms
               read(filePointer) tempPos
-              coord(i,j)=dble(tempPos)
+              coord(i,j)=tempPos
            enddo
            !nAtoms*4
            read(filePointer) junk
@@ -273,7 +273,7 @@ subroutine read_dcd_step(coord,nAtoms, filePointer)
            do i=1, nAtoms
               read(filePointer) tempPos
               tempPos = real_swap_endianess(tempPos)
-              coord(i,j)=dble(tempPos)
+              coord(i,j)=tempPos
            enddo
            !nAtoms*4
            read(filePointer) junk
