@@ -1,4 +1,4 @@
-!requires lapack
+!!requires lapack
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!  Modules !!!!!!!!!!!!!
@@ -73,13 +73,13 @@ program cg_charge_fit
         real, allocatable :: A(:,:)
         real, allocatable :: B(:,:)
         real, allocatable :: C(:,:)
+        real, allocatable :: minCgCharges(:)
         integer, allocatable :: boundaryRes(:)
         integer, allocatable :: minBoundaryRes(:)
         real minChi2
         real chi2
         real (kind=8) omp_get_wtime
-        integer iter, i
-!        integer, allocatable :: gen_rand_ordered_seq(:)
+        integer iter, i, j
 
         ti = omp_get_wtime()
 
@@ -92,7 +92,7 @@ program cg_charge_fit
 
         call read_atom_trajectory(C)
 
-        allocate(cgPos(nCg,3,nSteps))
+        allocate(cgPos(nCg,3,nSteps),minCgCharges(nCg))
 
         do iter=1,maxIter
 
@@ -108,13 +108,30 @@ program cg_charge_fit
                 !Fit charges
                 call fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg,chi2)
 
-                do i=1,nCg
-                        print*, cgCharges(i)
-                enddo
-
                 write(*,'("Charge fitting residual sum of squares for iteration",i4,"is:",f40.10)') iter,chi2
 
+                if (iter==1 .or. chi2 < minChi2) then
+                        minBoundaryRes = boundaryRes
+                        minCgCharges = cgCharges
+                        minChi2=chi2
+                endif
+
         enddo
+
+
+        open(25,file=outputFile)
+
+                write(25,'("Min RSS:",f10.5)') minChi2
+                write(25,'("Min CG Charges:")')
+                do i=1,nCg
+                        write(25,'(f10.5)') minCgCharges(i)
+                enddo
+                write(25,'("Min CG Boundary Residues:")')
+                do i=1,nCg-1
+                        write(25,'(i10)') minBoundaryRes(i)
+                enddo
+
+        close(25)
 
         t2 = omp_get_wtime()
         write(*,'("Total time elapsed:",f8.3)') t2-ti
@@ -145,8 +162,11 @@ subroutine create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,
         integer j
 
 
+!        open(13,file="temp.xyz")
         do step=1,nSteps
                 startAtom=1
+!                write(13,'(i5)') nCg
+!                write(13,'(i5)') nCg
                 do cg=1,nCg
                 
                         temp=0
@@ -156,15 +176,19 @@ subroutine create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,
                         else
                                 stopAtom = nAtoms
                         endif
-!                        print*, startAtom,stopAtom
+
                         do atom=startAtom,stopAtom
                                 temp = temp + atomMasses(atom)*atomPos(atom,:,step)
                                 mass = mass + atomMasses(atom)
                         enddo
                         cgPos(cg,:,step) = temp/mass
-                        startAtom = resAtomStart(boundaryRes(cg)+1)
+!                        write(13,'("C  ",3f8.3)') (cgPos(cg,j,step),j=1,3)
+                        if (cg<nCg) then
+                                startAtom = resAtomStart(boundaryRes(cg)+1)
+                        endif
                 enddo
         enddo
+!        close(13)
 
 endsubroutine create_CG_traj
 
@@ -229,13 +253,15 @@ subroutine read_atom_trajectory(C)
         ! Read atom dcd header and grab nAtoms, nSteps
         call read_dcd_header(atomDcdFile,nAtoms,nSteps,20)
 
+        nSteps=1
+
         allocate(atomPos(nAtoms,3,nSteps))
 
         do step=1,nSteps
                 call read_dcd_step(atomPos(:,:,step),nAtoms,20)
                 !Atom-atom distance for later
-                !$omp parallel private(atom1,atom2,j,dist,temp) SHARED(atomPos,C) num_threads(np)
-                !$omp do schedule(dynamic,10)
+!!                !$omp parallel private(atom1,atom2,j,dist,temp) SHARED(atomPos,C) num_threads(np)
+!!                !$omp do schedule(dynamic,10)
                 do atom1 = 1, nAtoms-1
                         do atom2 = atom1+1,nAtoms
                                 dist = 0
@@ -245,11 +271,13 @@ subroutine read_atom_trajectory(C)
                                 enddo
                                 dist = sqrt(dist)
                                 C(atom1,atom2) = C(atom1,atom2)-dist
-                                C(atom2,atom1) = C(atom2,atom1)-dist
+                                ! symmetrize the matrix
+                                C(atom2,atom1) = C(atom1,atom2)
+!                                C(atom2,atom1) = C(atom2,atom1)-dist
                         enddo
                 enddo
-                !$omp end do
-                !$omp end parallel 
+!!                !$omp end do
+!!                !$omp end parallel 
 
         enddo
 
@@ -461,8 +489,10 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
                                 dist = sqrt(dist)
 !!                                !$omp atomic
                                 A(cgSite1,cgSite2) = A(cgSite1,cgSite2)-dist
+                                !symmetrize the matrix
 !!                                !$omp atomic
-                                A(cgSite2,cgSite1) = A(cgSite2,cgSite1)-dist
+                                A(cgSite2,cgSite1) = A(cgSite1,cgSite2)
+!                                A(cgSite2,cgSite1) = A(cgSite2,cgSite1)-dist
                         enddo
                 enddo
 
@@ -490,20 +520,20 @@ subroutine fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg, rss)
         integer nAtoms
         integer nCg
         real A(nCg,nCg)
-        real ATemp(nCg+1,nCg)
+        real (kind=8) ATemp(nCg,nCg)
         real D(nCg-1,nCg)
         real B(nCg,nAtoms)
         real C(nAtoms,nAtoms)
-        real BTemp(nCg+1,nAtoms)
+        real BTemp(nCg,nAtoms)
         real cgCharges(nCg,1)
         real atomCharges(nAtoms)
         real atomChargesM(nAtoms,1)
-        real newB(nCg+1)
+        real (kind=8) newB(nCg)
         real temp(1,1)
         real rss
         !lapack routine variables
-        real workQuery(1)
-        real, allocatable :: work(:)
+        real (kind=8) workQuery(1)
+        real (kind=8), allocatable :: work(:)
         integer info
         integer lwork
         integer j, i, k
@@ -516,29 +546,28 @@ subroutine fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg, rss)
                 D(i,i+1)=-1
         enddo 
         !multiply A by D0 and B by D1 giving new matrices A and B the correct behavior
-        ATemp(1:nCg,:) = matmul(D,A)
-        BTemp(1:nCg,:) = matmul(D,B)
-        !generate new matrices with last line having 1s meaing charge is conserved
-        ATemp(nCg+1,:) = 1.0
-        BTemp(nCg+1,:) = 1.0
-
+        ATemp(1:(nCg-1),:) = matmul(dble(D),dble(A))
+        BTemp(1:(nCg-1),:) = matmul(D,B)
+        !generate new matrices with last line having 1.0s forcing charge conservation
+        ATemp(nCg,:) = 1.0
+        BTemp(nCg,:) = 1.0
 
         !Now use lapack routine to solve least squares problem A*cgCharges=B*atomCharges
-        newB = matmul(BTemp,atomCharges)
-        call sgels("N",nCg+1,nCg,1,ATemp,nCg+1,newB,nCg+1,workQuery,-1,info)
+        newB = matmul(dble(BTemp),dble(atomCharges))
+        call dgels("N",nCg,nCg,1,ATemp,nCg,newB,nCg,workQuery,-1,info)
         lwork = int(workQuery(1))
         print*, "optimal work array size:",lwork
         allocate(work(lwork))
-        call sgels("N",nCg+1,nCg,1,ATemp,nCg+1,newB,nCg+1,work,lwork,info)
+        call dgels("N",nCg,nCg,1,ATemp,nCg,newB,nCg,work,lwork,info)
         deallocate(work)
         
-        cgCharges(:,1) = newB(1:nCg)
+        cgCharges(:,1) = real(newB(1:nCg))
         atomChargesM(:,1) = atomCharges
 
         temp = matmul(transpose(atomChargesM),matmul(C,atomChargesM))+matmul(transpose(cgCharges),matmul(A,cgCharges))-2*matmul(transpose(cgCharges),matmul(B,atomChargesM))
         rss = temp(1,1)
 
-        write(*,'(a17,f8.3)') "Total CG Charge:",sum(cgCharges)
+        write(*,'(a17,f12.3," Total atomic charge:",f12.3)') "Total CG Charge:",sum(cgCharges),sum(atomCharges)
 !        write(*,'("Residual Sum of Squares:",f8.3,f8.3)') newB(nCg+1), rss(1,1)
 
 
