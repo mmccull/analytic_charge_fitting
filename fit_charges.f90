@@ -16,6 +16,18 @@ module openmp
 
 endmodule openmp
 
+module minData
+
+        integer saSteps ! number of simulated annealing steps
+        integer sdSteps ! number of steepest descent steps
+        integer nSets   ! number of copies
+
+        real, allocatable :: minChi2(:)
+        integer, allocatable :: minBoundaryRes(:,:)
+        real, allocatable :: minCgCharges(:,:)
+
+endmodule minData
+
 module atomData
 
         integer nAtoms
@@ -68,69 +80,105 @@ program cg_charge_fit
         use output
         use timing
         use openmp
+        use minData
         implicit none
-        integer, parameter :: maxIter=10
         real, allocatable :: A(:,:)
         real, allocatable :: B(:,:)
         real, allocatable :: C(:,:)
-        real, allocatable :: minCgCharges(:)
         integer, allocatable :: boundaryRes(:)
-        integer, allocatable :: minBoundaryRes(:)
-        real minChi2
         real chi2
         real (kind=8) omp_get_wtime
-        integer iter, i, j
+        integer iter
+        integer set
+        real check
+        real tempFactor
+        real deltaTemp
+        integer i
 
         ti = omp_get_wtime()
 
         call parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,outputFile,nCg)
+        nSets=400
+        saSteps=100
+        sdSteps=100
 
         call read_psf_file
 
         allocate(A(nCg,nCg),B(nCg,nAtoms),C(nAtoms,nAtoms),cgCharges(nCg))
-        allocate(boundaryRes(nCg-1),minBoundaryRes(nCg-1))!,gen_rand_ordered_seq(nCg-1))
+        allocate(boundaryRes(nCg-1),minBoundaryRes(nCg-1,nSets))!,gen_rand_ordered_seq(nCg-1))
 
         call read_atom_trajectory(C)
 
-        allocate(cgPos(nCg,3,nSteps),minCgCharges(nCg))
-
-        do iter=1,maxIter
-
-                !generate boundary atoms
-                call gen_rand_ordered_seq(nCg-1,1,nRes-1,boundaryRes)
-
-                !make CG trajectory
-                call create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,nSteps,boundaryRes)
-
-                !Accumulate A and B
-                call compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
-
-                !Fit charges
-                call fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg,chi2)
-
-                write(*,'("Charge fitting residual sum of squares for iteration",i4,"is:",f40.10)') iter,chi2
-
-                if (iter==1 .or. chi2 < minChi2) then
-                        minBoundaryRes = boundaryRes
-                        minCgCharges = cgCharges
-                        minChi2=chi2
-                endif
-
-        enddo
+        allocate(cgPos(nCg,3,nSteps),minCgCharges(nCg,nSets),minChi2(nSets))
 
 
         open(25,file=outputFile)
+        do set=1,nSets
 
-                write(25,'("Min RSS:",f10.5)') minChi2
+                tempFactor = 10000
+                deltaTemp = tempFactor/real(saSteps+1)
+                do iter=1,saSteps
+
+                        !generate boundary atoms
+                        call gen_rand_ordered_seq(nCg-1,1,nRes-1,boundaryRes)
+
+                        !make CG trajectory
+                        call create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,nSteps,boundaryRes)
+
+                        !Accumulate A and B
+                        call compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
+
+                        !Fit charges
+                        call fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg,chi2)
+
+                        !write(*,'("Charge fitting residual sum of squares for iteration",i4,"is:",f40.10)') iter,chi2
+
+                        call random_number(check)
+                        if (iter==1 .or. chi2 < minChi2(set) .or. exp(-(chi2-minChi2(set))/tempFactor)>=check) then   ! need to change this to be simulated annealing
+                                minBoundaryRes(:,set) = boundaryRes
+                                minCgCharges(:,set) = cgCharges
+                                minChi2(set)=chi2
+                        endif
+                        tempFactor = tempFactor-iter*deltaTemp
+
+                enddo
+
+                do iter=1,sdSteps
+
+                        do cg=1,nCg-1
+
+                                !move one boundary atom
+
+                                !make CG trajectory
+                                call create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,nSteps,boundaryRes)
+
+                                !Accumulate A and B
+                                call compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
+
+                                !Fit charges
+                                call fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg,chi2)
+
+                                if (chi2 < minChi2(set)) then 
+                                        minBoundaryRes(:,set) = boundaryRes
+                                        minCgCharges(:,set) = cgCharges
+                                        minChi2(set)=chi2
+                                endif
+
+                        enddo
+
+                enddo
+
+                write(25,'("Min RSS:",f10.5," for set",i10)') minChi2(set), set
                 write(25,'("Min CG Charges:")')
                 do i=1,nCg
-                        write(25,'(f10.5)') minCgCharges(i)
+                        write(25,'(f10.5)') minCgCharges(i,set)
                 enddo
                 write(25,'("Min CG Boundary Residues:")')
                 do i=1,nCg-1
-                        write(25,'(i10)') minBoundaryRes(i)
+                        write(25,'(i10)') minBoundaryRes(i,set)
                 enddo
 
+        enddo
         close(25)
 
         t2 = omp_get_wtime()
