@@ -94,13 +94,15 @@ program cg_charge_fit
         real tempFactor
         real deltaTemp
         integer i
+        integer cg
+        integer accept
 
         ti = omp_get_wtime()
 
         call parse_command_line(atomPsfFile,atomDcdFile,cgDcdFile,outputFile,nCg)
-        nSets=400
-        saSteps=100
-        sdSteps=100
+        nSets=10
+        saSteps=10
+        sdSteps=10
 
         call read_psf_file
 
@@ -115,8 +117,10 @@ program cg_charge_fit
         open(25,file=outputFile)
         do set=1,nSets
 
-                tempFactor = 10000
+                tempFactor = 1000
                 deltaTemp = tempFactor/real(saSteps+1)
+                accept = 0
+                write(*,'("Starting simulated annealing for set ",i5)') set
                 do iter=1,saSteps
 
                         !generate boundary atoms
@@ -134,41 +138,72 @@ program cg_charge_fit
                         !write(*,'("Charge fitting residual sum of squares for iteration",i4,"is:",f40.10)') iter,chi2
 
                         call random_number(check)
+                        write(*,'("Metropolis criteria:",f10.7)') exp(-(chi2-minChi2(set))/tempFactor)
                         if (iter==1 .or. chi2 < minChi2(set) .or. exp(-(chi2-minChi2(set))/tempFactor)>=check) then   ! need to change this to be simulated annealing
                                 minBoundaryRes(:,set) = boundaryRes
                                 minCgCharges(:,set) = cgCharges
                                 minChi2(set)=chi2
+                                accept = accept+1
                         endif
                         tempFactor = tempFactor-iter*deltaTemp
 
                 enddo
 
+                write(*,'("Acceptance percentage:",f8.3)') accept/real(saSteps)*100
+                write(*,'("Starting steepest descent for set ",i5)') set
                 do iter=1,sdSteps
 
                         do cg=1,nCg-1
 
                                 !move one boundary atom
+                                boundaryRes = minBoundaryRes(:,set)
+                                if (boundaryRes(cg) < nRes) then
+                                        boundaryRes(cg) = boundaryRes(cg)+1
 
-                                !make CG trajectory
-                                call create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,nSteps,boundaryRes)
+                                        !make CG trajectory
+                                        call update_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,nSteps,boundaryRes,cg)
 
-                                !Accumulate A and B
-                                call compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
+                                        !Accumulate A and B
+                                        call update_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps,cg)
 
-                                !Fit charges
-                                call fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg,chi2)
+                                        !Fit charges
+                                        call fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg,chi2)
 
-                                if (chi2 < minChi2(set)) then 
-                                        minBoundaryRes(:,set) = boundaryRes
-                                        minCgCharges(:,set) = cgCharges
-                                        minChi2(set)=chi2
+                                        if (chi2 < minChi2(set)) then 
+                                                minBoundaryRes(:,set) = boundaryRes
+                                                minCgCharges(:,set) = cgCharges
+                                                minChi2(set)=chi2
+                                        endif
+                                endif
+                                !reset boundaryRes
+                                boundaryRes(cg) = boundaryRes(cg)-1
+                                !move one boundary atom backward
+                                if (boundaryRes(cg) > 1) then
+                                        boundaryRes(cg) = boundaryRes(cg)-1
+
+                                        !make CG trajectory
+                                        call update_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,nSteps,boundaryRes,cg)
+
+                                        !Accumulate A and B
+                                        call update_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps,cg)
+
+                                        !Fit charges
+                                        call fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg,chi2)
+
+                                        if (chi2 < minChi2(set)) then 
+                                                minBoundaryRes(:,set) = boundaryRes
+                                                minCgCharges(:,set) = cgCharges
+                                                minChi2(set)=chi2
+                                        endif
                                 endif
 
                         enddo
 
                 enddo
 
+                write(*,'("Min RSS:",f10.5," for set",i10)') minChi2(set), set
                 write(25,'("Min RSS:",f10.5," for set",i10)') minChi2(set), set
+                write(25,'("Total CG charge:",f12.3," Total atomic charge:",f12.3)') sum(minCgCharges(:,set)),sum(atomCharges)
                 write(25,'("Min CG Charges:")')
                 do i=1,nCg
                         write(25,'(f10.5)') minCgCharges(i,set)
@@ -192,6 +227,8 @@ endprogram cg_charge_fit
 !!!!!!! Subroutines  !!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+!subroutine to create CG traj from a list of boundary residues.  It requires the atomic coordinates, residue start atoms, boundary residues and number
+!of CG sites as input.  It spits out the center of mass CG coordinates into cgPos.
 subroutine create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,nSteps,boundaryRes)
         implicit none
         integer nAtoms
@@ -210,11 +247,8 @@ subroutine create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,
         integer j
 
 
-!        open(13,file="temp.xyz")
         do step=1,nSteps
                 startAtom=1
-!                write(13,'(i5)') nCg
-!                write(13,'(i5)') nCg
                 do cg=1,nCg
                 
                         temp=0
@@ -230,17 +264,63 @@ subroutine create_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,
                                 mass = mass + atomMasses(atom)
                         enddo
                         cgPos(cg,:,step) = temp/mass
-!                        write(13,'("C  ",3f8.3)') (cgPos(cg,j,step),j=1,3)
                         if (cg<nCg) then
                                 startAtom = resAtomStart(boundaryRes(cg)+1)
                         endif
                 enddo
         enddo
-!        close(13)
 
 endsubroutine create_CG_traj
 
+!subroutine to update CG traj due to a change of one boundary residue
+!of CG sites as input.  It spits out the center of mass CG coordinates into cgPos.
+subroutine update_CG_traj(atomPos,atomMasses,nAtoms,resAtomStart,nRes,cgPos,nCg,nSteps,boundaryRes,updatedBR)
+        implicit none
+        integer nAtoms
+        integer nSteps
+        integer nCg
+        integer nRes
+        integer updatedBR
+        real atomPos(nAtoms,3,nSteps)
+        real atomMasses(nAtoms)
+        integer resAtomStart(nRes)
+        real cgPos(nCg,3,nSteps)
+        integer boundaryRes(nCg-1)
+        integer startAtom, stopAtom
+        integer cg, atom, step
+        real temp(3)
+        real mass
+        integer j
 
+
+        do step=1,nSteps
+                startAtom=1
+                do cg=updatedBR,updatedBR+1
+                
+                        temp=0
+                        mass=0
+                        if (cg<nCg) then
+                                stopAtom = resAtomStart(boundaryRes(cg)+1)-1
+                        else
+                                stopAtom = nAtoms
+                        endif
+
+                        do atom=startAtom,stopAtom
+                                temp = temp + atomMasses(atom)*atomPos(atom,:,step)
+                                mass = mass + atomMasses(atom)
+                        enddo
+                        cgPos(cg,:,step) = temp/mass
+                        if (cg<nCg) then
+                                startAtom = resAtomStart(boundaryRes(cg)+1)
+                        endif
+                enddo
+        enddo
+
+endsubroutine update_CG_traj
+
+
+
+!generate an ordered random sequence of integers numSeq long between integers minSeq and maxSeq
 subroutine gen_rand_ordered_seq(numSeq,minSeq,maxSeq,seq)
         implicit none
         integer numSeq
@@ -515,17 +595,12 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
         integer cgSite1, cgSite2
         integer j
         integer atom1, atom2
-        !open MP stuff
-        integer omp_get_thread_num, omp_get_num_procs, omp_get_num_threads, omp_get_max_threads
-        integer nProcs, nThreads, threadID
         integer step
 
         A=0
         B=0
 
         !Compute the distance between the CG sites
-!!        !$omp parallel private(step,cgSite1,cgSite2,atom1,j,dist,temp) SHARED(cgPos,A,B,atomPos) num_threads(np)
-!!        !$omp do schedule(dynamic)
         do step=1,nSteps
                 do cgSite1 = 1, nCg-1
                         do cgSite2 = cgSite1+1,nCg
@@ -535,12 +610,9 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
                                         dist = dist + temp*temp
                                 enddo
                                 dist = sqrt(dist)
-!!                                !$omp atomic
                                 A(cgSite1,cgSite2) = A(cgSite1,cgSite2)-dist
                                 !symmetrize the matrix
-!!                                !$omp atomic
                                 A(cgSite2,cgSite1) = A(cgSite1,cgSite2)
-!                                A(cgSite2,cgSite1) = A(cgSite2,cgSite1)-dist
                         enddo
                 enddo
 
@@ -552,17 +624,67 @@ subroutine compute_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps)
                                         temp = cgPos(cgSite1,j,step)-atomPos(atom1,j,step)
                                         dist = dist + temp*temp
                                 enddo
-!!                                !$omp atomic
                                 B(cgSite1,atom1) = B(cgSite1,atom1)-sqrt(dist)
                         enddo
                 enddo
         enddo
-!!        !$omp end do 
-!!        !$omp end parallel 
 
 endsubroutine compute_A_B_matrices
 
+!requires lapack
+!updates A and B matrices due to change of one boundary residue
+subroutine update_A_B_matrices(atomPos,nAtoms,cgPos,nCg,A,B,nSteps,updatedBR)
+        use openmp
+        implicit none
+        integer nAtoms
+        integer nCg
+        integer nSteps
+        integer updatedBR
+        real atomPos(nAtoms,3,nSteps)
+        real cgPos(nCg,3,nSteps)
+        real A(nCg,nCg)
+        real B(nCg,nAtoms)
+        real dist, temp
+        !loop indeces
+        integer cgSite1, cgSite2
+        integer j
+        integer atom1, atom2
+        integer step
 
+        !Compute the distance between the CG sites
+        do step=1,nSteps
+                do cgSite1 = updatedBR, updatedBR+1
+                        do cgSite2 = 1,nCg
+                                if (cgSite1 .ne. cgSite2) then
+                                        dist = 0
+                                        do j=1,3
+                                                temp = cgPos(cgSite1,j,step)-cgPos(cgSite2,j,step)
+                                                dist = dist + temp*temp
+                                        enddo
+                                        dist = sqrt(dist)
+                                        A(cgSite1,cgSite2) = A(cgSite1,cgSite2)-dist
+                                        !symmetrize the matrix
+                                        A(cgSite2,cgSite1) = A(cgSite1,cgSite2)
+                                endif
+                        enddo
+                enddo
+
+                do cgSite1 = updatedBR, updatedBR+1
+                        do atom1 = 1,nAtoms
+                                dist = 0
+                                do j=1,3
+                                        temp = cgPos(cgSite1,j,step)-atomPos(atom1,j,step)
+                                        dist = dist + temp*temp
+                                enddo
+                                B(cgSite1,atom1) = B(cgSite1,atom1)-sqrt(dist)
+                        enddo
+                enddo
+        enddo
+
+endsubroutine update_A_B_matrices
+
+
+!subroutine to compute CG charges from input matrices A and B.  The residual sum of squares is calculated with aid of all-atom matrix C
 subroutine fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg, rss)
         implicit none
         integer nAtoms
@@ -604,7 +726,6 @@ subroutine fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg, rss)
         newB = matmul(dble(BTemp),dble(atomCharges))
         call dgels("N",nCg,nCg,1,ATemp,nCg,newB,nCg,workQuery,-1,info)
         lwork = int(workQuery(1))
-        print*, "optimal work array size:",lwork
         allocate(work(lwork))
         call dgels("N",nCg,nCg,1,ATemp,nCg,newB,nCg,work,lwork,info)
         deallocate(work)
@@ -615,7 +736,7 @@ subroutine fit_charges(A, B, C, atomCharges, cgCharges, nAtoms, nCg, rss)
         temp = matmul(transpose(atomChargesM),matmul(C,atomChargesM))+matmul(transpose(cgCharges),matmul(A,cgCharges))-2*matmul(transpose(cgCharges),matmul(B,atomChargesM))
         rss = temp(1,1)
 
-        write(*,'(a17,f12.3," Total atomic charge:",f12.3)') "Total CG Charge:",sum(cgCharges),sum(atomCharges)
+!        write(*,'(a17,f12.3," Total atomic charge:",f12.3)') "Total CG Charge:",sum(cgCharges),sum(atomCharges)
 !        write(*,'("Residual Sum of Squares:",f8.3,f8.3)') newB(nCg+1), rss(1,1)
 
 
